@@ -16,9 +16,16 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
   const celestialsRef = useRef<CelestialBody[]>([]);
   const shockwavesRef = useRef<Shockwave[]>([]);
   
-  // Convert hex to rgb for canvas manipulation
+  // Robust hex to rgb conversion
   const hexToRgb = (hex: string) => {
-    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    if (!hex) return { r: 0, g: 0, b: 0 };
+    // Expand shorthand form (e.g. "03F") to full form (e.g. "0033FF")
+    const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
+    const fullHex = hex.replace(shorthandRegex, (m, r, g, b) => {
+      return r + r + g + g + b + b;
+    });
+
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(fullHex);
     return result ? {
       r: parseInt(result[1], 16),
       g: parseInt(result[2], 16),
@@ -29,23 +36,28 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d', { alpha: false });
+    
+    // Removing { alpha: false } to prevent potential composition issues in some environments
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     let animationFrameId: number;
-    let width = window.innerWidth;
-    let height = window.innerHeight;
+    let width = window.innerWidth || 800;
+    let height = window.innerHeight || 600;
     let tick = 0;
 
     // Initialization
     const initSimulation = () => {
       width = window.innerWidth;
       height = window.innerHeight;
+      
+      // Ensure canvas has dimensions
       canvas.width = width;
       canvas.height = height;
       
       // 1. Init Foreground Particles
-      const particleCount = Math.min((width * height) / 9000, 180);
+      // Reduce density slightly to ensure performance
+      const particleCount = Math.min((width * height) / 10000, 150);
       particlesRef.current = [];
       for (let i = 0; i < particleCount; i++) {
         particlesRef.current.push({
@@ -60,12 +72,12 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
 
       // 2. Init Background Stars (Parallax Layer)
       starsRef.current = [];
-      const starCount = 150;
+      const starCount = 100;
       for (let i = 0; i < starCount; i++) {
         starsRef.current.push({
           x: Math.random() * width,
           y: Math.random() * height,
-          z: Math.random() * 0.8 + 0.1, // Depth: 0.1 (far) to 0.9 (near)
+          z: Math.random() * 0.8 + 0.1, 
           size: Math.random() * 1.5,
           brightness: Math.random()
         });
@@ -76,8 +88,10 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
       const centerX = width / 2;
       const centerY = height / 2;
 
-      if (theme.name === 'DEEP_SPACE') {
-        // Spawn Black Hole
+      // Ensure we have a valid theme object
+      const safeTheme = theme || { name: 'DEFAULT', primary: '#fff', secondary: '#888', bg: '#000', accent: '#fff' };
+
+      if (safeTheme.name === 'DEEP_SPACE') {
         celestialsRef.current.push({
           type: 'BLACK_HOLE',
           x: centerX,
@@ -88,8 +102,7 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
           angle: 0,
           orbitRadius: 0
         });
-      } else if (theme.name === 'CRIMSON_TIDE') {
-         // Massive Red Sun
+      } else if (safeTheme.name === 'CRIMSON_TIDE') {
          celestialsRef.current.push({
             type: 'SUN',
             x: centerX,
@@ -101,24 +114,22 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
             orbitRadius: 20
          });
       } else {
-        // Procedural Planet
         celestialsRef.current.push({
           type: 'PLANET',
           x: centerX,
           y: centerY,
           radius: 80,
-          color: theme.primary,
+          color: safeTheme.primary,
           orbitSpeed: 0.005,
           angle: 0,
           orbitRadius: 100
         });
-        // Moon
         celestialsRef.current.push({
             type: 'PLANET',
             x: centerX,
             y: centerY,
             radius: 20,
-            color: theme.secondary,
+            color: safeTheme.secondary,
             orbitSpeed: 0.02,
             angle: Math.PI,
             orbitRadius: 220
@@ -127,6 +138,9 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
     };
 
     const drawCelestial = (c: CelestialBody, parallaxX: number, parallaxY: number) => {
+        // Safe Radius Check
+        const radius = Math.max(1, c.radius);
+        
         // Update Orbital Position
         if (c.orbitRadius > 0) {
             c.angle += c.orbitSpeed;
@@ -134,64 +148,79 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
             c.y = (height / 2) + Math.sin(c.angle) * c.orbitRadius;
         }
 
-        const x = c.x + parallaxX * 0.05; // Celestials move very slightly
+        const x = c.x + parallaxX * 0.05; 
         const y = c.y + parallaxY * 0.05;
 
         if (c.type === 'BLACK_HOLE') {
             // Accretion Disk
-            const gradient = ctx.createRadialGradient(x, y, c.radius * 0.8, x, y, c.radius * 3);
-            const rgb = hexToRgb(theme.secondary);
-            gradient.addColorStop(0, '#000000');
-            gradient.addColorStop(0.3, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 1)`);
-            gradient.addColorStop(0.6, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.2)`);
-            gradient.addColorStop(1, 'transparent');
-            
-            ctx.fillStyle = gradient;
-            ctx.beginPath();
-            ctx.arc(x, y, c.radius * 3, 0, Math.PI * 2);
-            ctx.fill();
+            try {
+                const gradient = ctx.createRadialGradient(x, y, radius * 0.8, x, y, radius * 3);
+                const rgb = hexToRgb(theme.secondary);
+                gradient.addColorStop(0, '#000000');
+                gradient.addColorStop(0.3, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 1)`);
+                gradient.addColorStop(0.6, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.2)`);
+                gradient.addColorStop(1, 'transparent');
+                
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(x, y, radius * 3, 0, Math.PI * 2);
+                ctx.fill();
+            } catch (e) {
+                // Fallback if gradient fails
+                ctx.fillStyle = '#111';
+                ctx.beginPath();
+                ctx.arc(x, y, radius * 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
 
             // Event Horizon
             ctx.fillStyle = '#000';
             ctx.shadowBlur = 20;
             ctx.shadowColor = theme.secondary;
             ctx.beginPath();
-            ctx.arc(x, y, c.radius, 0, Math.PI * 2);
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
             ctx.fill();
             ctx.shadowBlur = 0;
             
-            // Lensing effect (draw a white ring)
+            // Lensing effect
             ctx.strokeStyle = 'rgba(255,255,255,0.8)';
             ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.arc(x, y, c.radius * 1.2, 0, Math.PI * 2);
+            ctx.arc(x, y, radius * 1.2, 0, Math.PI * 2);
             ctx.stroke();
 
         } else if (c.type === 'PLANET' || c.type === 'SUN') {
-             // 3D Sphere Shading
-             const gradient = ctx.createRadialGradient(x - c.radius/3, y - c.radius/3, c.radius * 0.1, x, y, c.radius);
-             const rgb = hexToRgb(c.color);
-             
-             gradient.addColorStop(0, '#fff'); // Highlight
-             gradient.addColorStop(0.3, c.color); // Base
-             gradient.addColorStop(1, '#000'); // Shadow
+             try {
+                 // Ensure non-negative radii for gradient
+                 const innerR = Math.max(0, radius * 0.1);
+                 const outerR = Math.max(0.1, radius);
+                 
+                 const gradient = ctx.createRadialGradient(x - radius/3, y - radius/3, innerR, x, y, outerR);
+                 
+                 gradient.addColorStop(0, '#fff'); 
+                 gradient.addColorStop(0.3, c.color || '#888'); 
+                 gradient.addColorStop(1, '#000'); 
 
-             ctx.fillStyle = gradient;
+                 ctx.fillStyle = gradient;
+             } catch(e) {
+                 ctx.fillStyle = c.color || '#888';
+             }
              
-             // Atmosphere glow
              ctx.shadowBlur = c.type === 'SUN' ? 80 : 30;
-             ctx.shadowColor = c.color;
+             ctx.shadowColor = c.color || '#fff';
              
              ctx.beginPath();
-             ctx.arc(x, y, c.radius, 0, Math.PI * 2);
+             ctx.arc(x, y, radius, 0, Math.PI * 2);
              ctx.fill();
              ctx.shadowBlur = 0;
         }
     };
 
     const render = () => {
+      if (!ctx || !width || !height) return;
+
       tick++;
-      ctx.fillStyle = theme.bg;
+      ctx.fillStyle = theme.bg || '#000';
       ctx.fillRect(0, 0, width, height);
 
       const rgbPrimary = hexToRgb(theme.primary);
@@ -203,23 +232,19 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
       const parallaxX = (width / 2 - mx);
       const parallaxY = (height / 2 - my);
 
-      // --- 1. Draw Background Stars (Parallax) ---
+      // --- 1. Draw Background Stars ---
       starsRef.current.forEach(star => {
-          // Stars move based on their 'z' depth. Closer stars (higher z) move more.
-          // Inverted movement for background depth effect
           const px = star.x + (parallaxX * star.z * 0.1); 
           const py = star.y + (parallaxY * star.z * 0.1);
 
-          // Wrap around screen
           let drawX = (px % width);
           if (drawX < 0) drawX += width;
           let drawY = (py % height);
           if (drawY < 0) drawY += height;
 
-          // Twinkle
           const flicker = Math.sin(tick * 0.05 + star.x) * 0.3 + 0.7;
 
-          ctx.fillStyle = `rgba(255, 255, 255, ${star.brightness * flicker})`;
+          ctx.fillStyle = `rgba(255, 255, 255, ${Math.max(0, star.brightness * flicker)})`;
           ctx.beginPath();
           ctx.arc(drawX, drawY, star.size, 0, Math.PI * 2);
           ctx.fill();
@@ -231,7 +256,7 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
       // --- 3. Draw Shockwaves ---
       for (let i = shockwavesRef.current.length - 1; i >= 0; i--) {
         const sw = shockwavesRef.current[i];
-        sw.radius += 10;
+        sw.radius += 5; // Slower expansion
         const opacity = 1 - (sw.radius / sw.maxRadius);
         if (opacity <= 0) {
           shockwavesRef.current.splice(i, 1);
@@ -239,13 +264,12 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
         }
         ctx.beginPath();
         ctx.arc(sw.x, sw.y, sw.radius, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(${rgbPrimary.r}, ${rgbPrimary.g}, ${rgbPrimary.b}, ${opacity})`;
+        ctx.strokeStyle = `rgba(${rgbPrimary.r}, ${rgbPrimary.g}, ${rgbPrimary.b}, ${Math.max(0, opacity)})`;
         ctx.lineWidth = 2;
         ctx.stroke();
       }
 
       // --- 4. Update & Draw Particles (Foreground) ---
-      // These act as a HUD/Scanner layer, so they move opposite to background to create "glass" effect
       const hudParallaxX = parallaxX * -0.02;
       const hudParallaxY = parallaxY * -0.02;
 
@@ -257,7 +281,7 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
         if (p.x < 0 || p.x > width) p.vx *= -1;
         if (p.y < 0 || p.y > height) p.vy *= -1;
 
-        // Black Hole Gravity Override
+        // Black Hole Interaction
         const blackHole = celestialsRef.current.find(c => c.type === 'BLACK_HOLE');
         if (blackHole) {
              const bx = (width/2) + Math.cos(blackHole.angle)*blackHole.orbitRadius + (parallaxX * 0.05);
@@ -266,13 +290,10 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
              const dy = by - p.y;
              const dist = Math.sqrt(dx*dx + dy*dy);
              
-             // Event Horizon kill zone
              if (dist < blackHole.radius) {
-                 // Respawn particle elsewhere
                  p.x = Math.random() * width;
                  p.y = Math.random() < 0.5 ? 0 : height;
              } else if (dist < 400) {
-                 // Strong pull
                  const force = 50 / dist;
                  p.vx += dx/dist * force;
                  p.vy += dy/dist * force;
@@ -286,7 +307,6 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
             const dist = Math.sqrt(dx * dx + dy * dy);
             if (dist < 200) {
                 const force = (200 - dist) / 200;
-                // Repulse slightly
                 p.vx -= (dx/dist) * force * 0.5;
                 p.vy -= (dy/dist) * force * 0.5;
             }
@@ -311,18 +331,22 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
       // Draw Network/Mesh
       if (renderMode !== RenderMode.PARTICLES) {
         ctx.save();
-        ctx.translate(hudParallaxX, hudParallaxY); // Apply slight HUD movement
+        ctx.translate(hudParallaxX, hudParallaxY); 
         
+        // Use a simpler loop for connections to avoid heavy CPU
         for (let i = 0; i < particlesRef.current.length; i++) {
           const p1 = particlesRef.current[i];
+          // Limit checks to keep FPS high
           for (let j = i + 1; j < particlesRef.current.length; j++) {
             const p2 = particlesRef.current[j];
             const dx = p1.x - p2.x;
             const dy = p1.y - p2.y;
-            const distSq = dx * dx + dy * dy;
+            // Pre-check distance roughly
+            if (Math.abs(dx) > 150 || Math.abs(dy) > 150) continue;
 
-            if (distSq < 20000) {
-              const opacity = 1 - Math.sqrt(distSq) / 141;
+            const distSq = dx * dx + dy * dy;
+            if (distSq < 22500) { // 150^2
+              const opacity = 1 - Math.sqrt(distSq) / 150;
               
               ctx.beginPath();
               ctx.moveTo(p1.x, p1.y);
@@ -334,12 +358,15 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
               if (renderMode === RenderMode.MESH) {
                  for (let k = j + 1; k < particlesRef.current.length; k++) {
                      const p3 = particlesRef.current[k];
+                     // Quick check
+                     if (Math.abs(p2.x - p3.x) > 150 || Math.abs(p2.y - p3.y) > 150) continue;
+                     
                      const dx2 = p2.x - p3.x;
                      const dy2 = p2.y - p3.y;
-                     if (dx2*dx2 + dy2*dy2 < 20000) {
+                     if (dx2*dx2 + dy2*dy2 < 22500) {
                          const dx3 = p1.x - p3.x;
                          const dy3 = p1.y - p3.y;
-                         if (dx3*dx3 + dy3*dy3 < 20000) {
+                         if (dx3*dx3 + dy3*dy3 < 22500) {
                              ctx.beginPath();
                              ctx.moveTo(p1.x, p1.y);
                              ctx.lineTo(p2.x, p2.y);
@@ -357,7 +384,7 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
         ctx.restore();
       }
 
-      // Draw Particles (Dots)
+      // Draw Particles
       ctx.save();
       ctx.translate(hudParallaxX, hudParallaxY);
       particlesRef.current.forEach((p) => {
@@ -372,7 +399,10 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
     };
 
     // Events
-    const handleResize = () => initSimulation();
+    const handleResize = () => {
+        initSimulation();
+    };
+    
     const handleMouseMove = (e: MouseEvent) => {
       mouseRef.current.x = e.clientX;
       mouseRef.current.y = e.clientY;
@@ -395,6 +425,7 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
     canvas.addEventListener('mouseleave', handleMouseLeave);
     canvas.addEventListener('mousedown', handleMouseDown);
 
+    // Initial render
     initSimulation();
     render();
 
@@ -407,7 +438,7 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
     };
   }, [theme, renderMode]);
 
-  return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full block z-0" />;
+  return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full block z-0" style={{ backgroundColor: theme.bg }} />;
 };
 
 export default FluxCanvas;
