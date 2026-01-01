@@ -15,6 +15,8 @@ export interface Particle {
   life: number;
   baseX?: number;
   baseY?: number;
+  type: 'NORMAL' | 'COMET';
+  trail: {x: number, y: number}[];
 }
 
 export interface Star {

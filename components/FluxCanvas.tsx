@@ -19,7 +19,6 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
   // Robust hex to rgb conversion
   const hexToRgb = (hex: string) => {
     if (!hex) return { r: 0, g: 0, b: 0 };
-    // Expand shorthand form (e.g. "03F") to full form (e.g. "0033FF")
     const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
     const fullHex = hex.replace(shorthandRegex, (m, r, g, b) => {
       return r + r + g + g + b + b;
@@ -37,7 +36,6 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     
-    // Removing { alpha: false } to prevent potential composition issues in some environments
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
@@ -46,19 +44,29 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
     let height = window.innerHeight || 600;
     let tick = 0;
 
+    // Helper to spawn comets dynamically
+    const spawnComet = (x: number, y: number, vx: number, vy: number) => {
+        particlesRef.current.push({
+          x, y, vx, vy,
+          size: Math.random() * 3 + 2,
+          life: 200 + Math.random() * 100, // Frames of life
+          type: 'COMET',
+          trail: []
+        });
+    };
+
     // Initialization
     const initSimulation = () => {
       width = window.innerWidth;
       height = window.innerHeight;
       
-      // Ensure canvas has dimensions
       canvas.width = width;
       canvas.height = height;
       
-      // 1. Init Foreground Particles
-      // Reduce density slightly to ensure performance
-      const particleCount = Math.min((width * height) / 10000, 150);
       particlesRef.current = [];
+
+      // 1. Init Foreground Particles (Normal)
+      const particleCount = Math.min((width * height) / 11000, 130);
       for (let i = 0; i < particleCount; i++) {
         particlesRef.current.push({
           x: Math.random() * width,
@@ -66,13 +74,17 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
           vx: (Math.random() - 0.5) * 0.8,
           vy: (Math.random() - 0.5) * 0.8,
           size: Math.random() * 2 + 1,
-          life: Math.random() * 100
+          life: 9999, // Infinite life for normal particles
+          type: 'NORMAL',
+          trail: []
         });
       }
 
-      // 2. Init Background Stars (Parallax Layer)
+      // NO initial comets. They are spawned dynamically.
+
+      // 2. Init Background Stars
       starsRef.current = [];
-      const starCount = 100;
+      const starCount = 150; 
       for (let i = 0; i < starCount; i++) {
         starsRef.current.push({
           x: Math.random() * width,
@@ -83,12 +95,10 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
         });
       }
 
-      // 3. Init Celestial Bodies based on Theme
+      // 3. Init Celestial Bodies
       celestialsRef.current = [];
       const centerX = width / 2;
       const centerY = height / 2;
-
-      // Ensure we have a valid theme object
       const safeTheme = theme || { name: 'DEFAULT', primary: '#fff', secondary: '#888', bg: '#000', accent: '#fff' };
 
       if (safeTheme.name === 'DEEP_SPACE') {
@@ -96,11 +106,21 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
           type: 'BLACK_HOLE',
           x: centerX,
           y: centerY,
-          radius: 60,
+          radius: 70,
           color: '#000000',
           orbitSpeed: 0,
           angle: 0,
           orbitRadius: 0
+        });
+        celestialsRef.current.push({
+            type: 'PLANET',
+            x: centerX,
+            y: centerY,
+            radius: 15,
+            color: '#6366f1',
+            orbitSpeed: 0.015,
+            angle: 0,
+            orbitRadius: 250
         });
       } else if (safeTheme.name === 'CRIMSON_TIDE') {
          celestialsRef.current.push({
@@ -137,65 +157,57 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
       }
     };
 
-    const drawCelestial = (c: CelestialBody, parallaxX: number, parallaxY: number) => {
-        // Safe Radius Check
-        const radius = Math.max(1, c.radius);
-        
-        // Update Orbital Position
+    const updateCelestialPosition = (c: CelestialBody) => {
         if (c.orbitRadius > 0) {
             c.angle += c.orbitSpeed;
             c.x = (width / 2) + Math.cos(c.angle) * c.orbitRadius;
             c.y = (height / 2) + Math.sin(c.angle) * c.orbitRadius;
         }
+    };
 
-        const x = c.x + parallaxX * 0.05; 
-        const y = c.y + parallaxY * 0.05;
-
+    const drawCelestial = (c: CelestialBody, screenX: number, screenY: number) => {
+        const radius = Math.max(1, c.radius);
+        
         if (c.type === 'BLACK_HOLE') {
-            // Accretion Disk
             try {
-                const gradient = ctx.createRadialGradient(x, y, radius * 0.8, x, y, radius * 3);
+                const gradient = ctx.createRadialGradient(screenX, screenY, radius * 0.8, screenX, screenY, radius * 3.5);
                 const rgb = hexToRgb(theme.secondary);
                 gradient.addColorStop(0, '#000000');
-                gradient.addColorStop(0.3, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 1)`);
-                gradient.addColorStop(0.6, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.2)`);
+                gradient.addColorStop(0.2, '#000000');
+                gradient.addColorStop(0.35, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 1)`);
+                gradient.addColorStop(0.6, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.1)`);
                 gradient.addColorStop(1, 'transparent');
                 
                 ctx.fillStyle = gradient;
                 ctx.beginPath();
-                ctx.arc(x, y, radius * 3, 0, Math.PI * 2);
+                ctx.arc(screenX, screenY, radius * 3.5, 0, Math.PI * 2);
                 ctx.fill();
             } catch (e) {
-                // Fallback if gradient fails
                 ctx.fillStyle = '#111';
                 ctx.beginPath();
-                ctx.arc(x, y, radius * 3, 0, Math.PI * 2);
+                ctx.arc(screenX, screenY, radius * 3, 0, Math.PI * 2);
                 ctx.fill();
             }
 
-            // Event Horizon
             ctx.fillStyle = '#000';
-            ctx.shadowBlur = 20;
+            ctx.shadowBlur = 30;
             ctx.shadowColor = theme.secondary;
             ctx.beginPath();
-            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.arc(screenX, screenY, radius, 0, Math.PI * 2);
             ctx.fill();
             ctx.shadowBlur = 0;
             
-            // Lensing effect
-            ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+            ctx.strokeStyle = `rgba(255,255,255,0.4)`;
             ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.arc(x, y, radius * 1.2, 0, Math.PI * 2);
+            ctx.arc(screenX, screenY, radius * 1.5, 0, Math.PI * 2);
             ctx.stroke();
 
         } else if (c.type === 'PLANET' || c.type === 'SUN') {
              try {
-                 // Ensure non-negative radii for gradient
                  const innerR = Math.max(0, radius * 0.1);
                  const outerR = Math.max(0.1, radius);
-                 
-                 const gradient = ctx.createRadialGradient(x - radius/3, y - radius/3, innerR, x, y, outerR);
+                 const gradient = ctx.createRadialGradient(screenX - radius/3, screenY - radius/3, innerR, screenX, screenY, outerR);
                  
                  gradient.addColorStop(0, '#fff'); 
                  gradient.addColorStop(0.3, c.color || '#888'); 
@@ -210,7 +222,7 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
              ctx.shadowColor = c.color || '#fff';
              
              ctx.beginPath();
-             ctx.arc(x, y, radius, 0, Math.PI * 2);
+             ctx.arc(screenX, screenY, radius, 0, Math.PI * 2);
              ctx.fill();
              ctx.shadowBlur = 0;
         }
@@ -226,13 +238,50 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
       const rgbPrimary = hexToRgb(theme.primary);
       const rgbSecondary = hexToRgb(theme.secondary);
 
-      // Parallax Calculation
+      // Parallax
       const mx = mouseRef.current.active ? mouseRef.current.x : width / 2;
       const my = mouseRef.current.active ? mouseRef.current.y : height / 2;
       const parallaxX = (width / 2 - mx);
       const parallaxY = (height / 2 - my);
 
-      // --- 1. Draw Background Stars ---
+      // --- Spawner Logic: Ambient Comets ---
+      // Randomly spawn comets from edges to keep scene alive
+      if (Math.random() < 0.015) { // ~1 per second
+          const edge = Math.floor(Math.random() * 4); // 0: top, 1: right, 2: bottom, 3: left
+          let sx = 0, sy = 0, svx = 0, svy = 0;
+          const speed = Math.random() * 2 + 3; // Fast
+          
+          if (edge === 0) { // Top
+              sx = Math.random() * width; sy = 0; 
+              svx = (Math.random() - 0.5) * 2; svy = speed; 
+          } else if (edge === 1) { // Right
+              sx = width; sy = Math.random() * height; 
+              svx = -speed; svy = (Math.random() - 0.5) * 2; 
+          } else if (edge === 2) { // Bottom
+              sx = Math.random() * width; sy = height; 
+              svx = (Math.random() - 0.5) * 2; svy = -speed; 
+          } else { // Left
+              sx = 0; sy = Math.random() * height; 
+              svx = speed; svy = (Math.random() - 0.5) * 2; 
+          }
+          
+          spawnComet(sx, sy, svx, svy);
+      }
+
+      // --- 0. Update Physics & Identify Black Hole ---
+      let bhScreen: { x: number, y: number, radius: number } | null = null;
+      celestialsRef.current.forEach(c => {
+          updateCelestialPosition(c);
+          if (c.type === 'BLACK_HOLE') {
+              bhScreen = {
+                  x: c.x + parallaxX * 0.05,
+                  y: c.y + parallaxY * 0.05,
+                  radius: c.radius
+              };
+          }
+      });
+
+      // --- 1. Draw Background Stars with Lensing ---
       starsRef.current.forEach(star => {
           const px = star.x + (parallaxX * star.z * 0.1); 
           const py = star.y + (parallaxY * star.z * 0.1);
@@ -242,8 +291,21 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
           let drawY = (py % height);
           if (drawY < 0) drawY += height;
 
-          const flicker = Math.sin(tick * 0.05 + star.x) * 0.3 + 0.7;
+          if (bhScreen) {
+              const dx = drawX - bhScreen.x;
+              const dy = drawY - bhScreen.y;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              const lensingRadius = bhScreen.radius * 6;
 
+              if (dist < lensingRadius && dist > 1) {
+                  const distortionStrength = (1 - dist / lensingRadius);
+                  const pushFactor = distortionStrength * distortionStrength * bhScreen.radius * 0.8; 
+                  drawX += (dx / dist) * pushFactor;
+                  drawY += (dy / dist) * pushFactor;
+              }
+          }
+
+          const flicker = Math.sin(tick * 0.05 + star.x) * 0.3 + 0.7;
           ctx.fillStyle = `rgba(255, 255, 255, ${Math.max(0, star.brightness * flicker)})`;
           ctx.beginPath();
           ctx.arc(drawX, drawY, star.size, 0, Math.PI * 2);
@@ -251,12 +313,30 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
       });
 
       // --- 2. Draw Celestial Bodies ---
-      celestialsRef.current.forEach(c => drawCelestial(c, parallaxX, parallaxY));
+      celestialsRef.current.forEach(c => {
+          let cx = c.x + parallaxX * 0.05;
+          let cy = c.y + parallaxY * 0.05;
+
+          if (c.type !== 'BLACK_HOLE' && bhScreen) {
+              const dx = cx - bhScreen.x;
+              const dy = cy - bhScreen.y;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              const lensingRadius = bhScreen.radius * 6;
+
+              if (dist < lensingRadius && dist > 1) {
+                   const distortionStrength = (1 - dist / lensingRadius);
+                   const pushFactor = distortionStrength * distortionStrength * bhScreen.radius * 0.8;
+                   cx += (dx / dist) * pushFactor;
+                   cy += (dy / dist) * pushFactor;
+              }
+          }
+          drawCelestial(c, cx, cy);
+      });
 
       // --- 3. Draw Shockwaves ---
       for (let i = shockwavesRef.current.length - 1; i >= 0; i--) {
         const sw = shockwavesRef.current[i];
-        sw.radius += 5; // Slower expansion
+        sw.radius += 5;
         const opacity = 1 - (sw.radius / sw.maxRadius);
         if (opacity <= 0) {
           shockwavesRef.current.splice(i, 1);
@@ -269,85 +349,132 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
         ctx.stroke();
       }
 
-      // --- 4. Update & Draw Particles (Foreground) ---
+      // --- 4. Foreground Particles Logic (Reverse Loop for deletion) ---
       const hudParallaxX = parallaxX * -0.02;
       const hudParallaxY = parallaxY * -0.02;
 
-      particlesRef.current.forEach((p) => {
+      for (let i = particlesRef.current.length - 1; i >= 0; i--) {
+        const p = particlesRef.current[i];
+        
         p.x += p.vx;
         p.y += p.vy;
 
-        // Bounce
-        if (p.x < 0 || p.x > width) p.vx *= -1;
-        if (p.y < 0 || p.y > height) p.vy *= -1;
+        // Comet specific updates
+        if (p.type === 'COMET') {
+            p.life--;
+            // Remove dead comets
+            if (p.life <= 0) {
+                particlesRef.current.splice(i, 1);
+                continue;
+            }
 
-        // Black Hole Interaction
-        const blackHole = celestialsRef.current.find(c => c.type === 'BLACK_HOLE');
-        if (blackHole) {
-             const bx = (width/2) + Math.cos(blackHole.angle)*blackHole.orbitRadius + (parallaxX * 0.05);
-             const by = (height/2) + Math.sin(blackHole.angle)*blackHole.orbitRadius + (parallaxY * 0.05);
-             const dx = bx - p.x;
-             const dy = by - p.y;
-             const dist = Math.sqrt(dx*dx + dy*dy);
+            p.trail.push({x: p.x, y: p.y});
+            if (p.trail.length > 20) p.trail.shift();
+            
+            // Comets bounce off walls
+            if (p.x < 0 || p.x > width) p.vx *= -1;
+            if (p.y < 0 || p.y > height) p.vy *= -1;
+            
+        } else {
+            // Normal particle wall bounce
+            if (p.x < 0 || p.x > width) p.vx *= -1;
+            if (p.y < 0 || p.y > height) p.vy *= -1;
+        }
+
+        // Interaction with BH Physics
+        if (bhScreen) {
+             const dx = bhScreen.x - p.x; 
+             const dy = bhScreen.y - p.y;
+             const adjDx = dx + hudParallaxX;
+             const adjDy = dy + hudParallaxY;
+             const dist = Math.sqrt(adjDx*adjDx + adjDy*adjDy);
              
-             if (dist < blackHole.radius) {
-                 p.x = Math.random() * width;
-                 p.y = Math.random() < 0.5 ? 0 : height;
-             } else if (dist < 400) {
-                 const force = 50 / dist;
-                 p.vx += dx/dist * force;
-                 p.vy += dy/dist * force;
+             if (dist < bhScreen.radius) {
+                 // Reset normal particles, delete comets
+                 if (p.type === 'COMET') {
+                     particlesRef.current.splice(i, 1);
+                     continue;
+                 } else {
+                     p.x = Math.random() * width;
+                     p.y = Math.random() < 0.5 ? 0 : height;
+                 }
+             } else if (dist < 600) {
+                 const pullFactor = p.type === 'COMET' ? 0.2 : 0.05; 
+                 const force = 60 / dist; 
+                 p.vx += (adjDx/dist) * force * pullFactor;
+                 p.vy += (adjDy/dist) * force * pullFactor;
              }
         }
 
-        // Mouse Interaction
+        // Improved Mouse Interaction
         if (mouseRef.current.active) {
             const dx = mx - p.x;
             const dy = my - p.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist < 200) {
-                const force = (200 - dist) / 200;
-                p.vx -= (dx/dist) * force * 0.5;
-                p.vy -= (dy/dist) * force * 0.5;
+            const interactRadius = 250;
+
+            if (dist < interactRadius) {
+                const force = (interactRadius - dist) / interactRadius;
+                const angle = Math.atan2(dy, dx);
+                
+                if (p.type === 'COMET') {
+                    // Comets get excited/turbulent around mouse
+                    p.vx -= Math.cos(angle) * force * 1.5;
+                    p.vy -= Math.sin(angle) * force * 1.5;
+                } else {
+                    // Normal particles gently float away
+                    p.vx -= Math.cos(angle) * force * 0.5;
+                    p.vy -= Math.sin(angle) * force * 0.5;
+                }
             }
         }
         
-        // Shockwave Interaction
+        // Shockwaves
         shockwavesRef.current.forEach(sw => {
             const dx = p.x - sw.x;
             const dy = p.y - sw.y;
             const dist = Math.sqrt(dx*dx + dy*dy);
-            if (Math.abs(dist - sw.radius) < 30) {
+            if (Math.abs(dist - sw.radius) < 50) {
                 const angle = Math.atan2(dy, dx);
-                p.vx += Math.cos(angle) * 2;
-                p.vy += Math.sin(angle) * 2;
+                const push = p.type === 'COMET' ? 4 : 2;
+                p.vx += Math.cos(angle) * push;
+                p.vy += Math.sin(angle) * push;
             }
         });
 
-        p.vx *= 0.98;
-        p.vy *= 0.98;
-      });
+        // Speed Limit
+        const maxSpeed = p.type === 'COMET' ? 15 : 4;
+        const speed = Math.sqrt(p.vx*p.vx + p.vy*p.vy);
+        if (speed > maxSpeed) {
+            p.vx = (p.vx / speed) * maxSpeed;
+            p.vy = (p.vy / speed) * maxSpeed;
+        }
 
-      // Draw Network/Mesh
+        // Drag
+        p.vx *= 0.99;
+        p.vy *= 0.99;
+      }
+
+      // Draw Network (Only normal particles)
       if (renderMode !== RenderMode.PARTICLES) {
         ctx.save();
         ctx.translate(hudParallaxX, hudParallaxY); 
         
-        // Use a simpler loop for connections to avoid heavy CPU
         for (let i = 0; i < particlesRef.current.length; i++) {
           const p1 = particlesRef.current[i];
-          // Limit checks to keep FPS high
+          if (p1.type === 'COMET') continue; 
+
           for (let j = i + 1; j < particlesRef.current.length; j++) {
             const p2 = particlesRef.current[j];
+            if (p2.type === 'COMET') continue;
+
             const dx = p1.x - p2.x;
             const dy = p1.y - p2.y;
-            // Pre-check distance roughly
             if (Math.abs(dx) > 150 || Math.abs(dy) > 150) continue;
 
             const distSq = dx * dx + dy * dy;
-            if (distSq < 22500) { // 150^2
+            if (distSq < 22500) {
               const opacity = 1 - Math.sqrt(distSq) / 150;
-              
               ctx.beginPath();
               ctx.moveTo(p1.x, p1.y);
               ctx.lineTo(p2.x, p2.y);
@@ -358,9 +485,9 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
               if (renderMode === RenderMode.MESH) {
                  for (let k = j + 1; k < particlesRef.current.length; k++) {
                      const p3 = particlesRef.current[k];
-                     // Quick check
-                     if (Math.abs(p2.x - p3.x) > 150 || Math.abs(p2.y - p3.y) > 150) continue;
+                     if (p3.type === 'COMET') continue;
                      
+                     if (Math.abs(p2.x - p3.x) > 150 || Math.abs(p2.y - p3.y) > 150) continue;
                      const dx2 = p2.x - p3.x;
                      const dy2 = p2.y - p3.y;
                      if (dx2*dx2 + dy2*dy2 < 22500) {
@@ -384,25 +511,44 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
         ctx.restore();
       }
 
-      // Draw Particles
+      // Draw Particles & Trails
       ctx.save();
       ctx.translate(hudParallaxX, hudParallaxY);
       particlesRef.current.forEach((p) => {
+         // Draw Comet Trail
+         if (p.type === 'COMET' && p.trail.length > 1) {
+            for (let i = 0; i < p.trail.length - 1; i++) {
+                const opacity = (i / p.trail.length) * 0.8;
+                ctx.beginPath();
+                ctx.moveTo(p.trail[i].x, p.trail[i].y);
+                ctx.lineTo(p.trail[i+1].x, p.trail[i+1].y);
+                ctx.strokeStyle = `rgba(${rgbPrimary.r}, ${rgbPrimary.g}, ${rgbPrimary.b}, ${opacity})`;
+                ctx.lineWidth = p.size * (i / p.trail.length); // Tapering
+                ctx.lineCap = 'round';
+                ctx.stroke();
+            }
+         }
+
          ctx.beginPath();
-         ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-         ctx.fillStyle = `rgba(${rgbPrimary.r}, ${rgbPrimary.g}, ${rgbPrimary.b}, 1)`;
+         ctx.arc(p.x, p.y, p.type === 'COMET' ? p.size * 1.5 : p.size, 0, Math.PI * 2);
+         ctx.fillStyle = p.type === 'COMET' 
+            ? `rgba(255, 255, 255, 1)` // Bright white head for comets
+            : `rgba(${rgbPrimary.r}, ${rgbPrimary.g}, ${rgbPrimary.b}, 1)`;
+         
+         if (p.type === 'COMET') {
+             ctx.shadowBlur = 10;
+             ctx.shadowColor = `rgba(${rgbPrimary.r}, ${rgbPrimary.g}, ${rgbPrimary.b}, 0.8)`;
+         }
+         
          ctx.fill();
+         ctx.shadowBlur = 0;
       });
       ctx.restore();
 
       animationFrameId = requestAnimationFrame(render);
     };
 
-    // Events
-    const handleResize = () => {
-        initSimulation();
-    };
-    
+    const handleResize = () => { initSimulation(); };
     const handleMouseMove = (e: MouseEvent) => {
       mouseRef.current.x = e.clientX;
       mouseRef.current.y = e.clientY;
@@ -410,14 +556,27 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
     };
     const handleMouseLeave = () => { mouseRef.current.active = false; };
     const handleMouseDown = (e: MouseEvent) => {
+        // Create Shockwave
         shockwavesRef.current.push({
             id: Date.now(),
             x: e.clientX,
             y: e.clientY,
             radius: 1,
-            maxRadius: 500,
-            strength: 50
+            maxRadius: 600,
+            strength: 80
         });
+
+        // Spawn Comet Burst
+        for (let i = 0; i < 8; i++) {
+            const angle = (Math.PI * 2 * i) / 8 + (Math.random() - 0.5) * 0.5; // Radial burst with variance
+            const speed = Math.random() * 4 + 4; // Fast
+            spawnComet(
+                e.clientX, 
+                e.clientY, 
+                Math.cos(angle) * speed, 
+                Math.sin(angle) * speed
+            );
+        }
     };
 
     window.addEventListener('resize', handleResize);
@@ -425,7 +584,6 @@ const FluxCanvas: React.FC<FluxCanvasProps> = ({ theme, renderMode }) => {
     canvas.addEventListener('mouseleave', handleMouseLeave);
     canvas.addEventListener('mousedown', handleMouseDown);
 
-    // Initial render
     initSimulation();
     render();
 
